@@ -1,0 +1,27 @@
+{
+  "name": "cascade_energy_weather_api",
+  "version": "1.0.0",
+  "description": "Retrieves weather data for all required locations on a daily basis. \r This system supports in-flight data transformations and the ability to trace \r data back to the source.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hapaboy/cascade_energy_weather_api.git"
+  },
+  "author": "Scott Oshiro",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Hapaboy/cascade_energy_weather_api/issues"
+  },
+  "homepage": "https://github.com/Hapaboy/cascade_energy_weather_api#readme",
+  "dependencies": {
+    "@types/node": "^15.12.2",
+    "aws-sdk": "^2.927.0",
+    "uuid": "^8.3.2"
+  },
+  "devDependencies": {
+    "@types/aws-sdk": "^2.7.0"
+  }
+}
