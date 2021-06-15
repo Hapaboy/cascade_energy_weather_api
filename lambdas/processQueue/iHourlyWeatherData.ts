@@ -1,4 +1,5 @@
 export interface IHourlyWeatherData {
+    'location': string,
     'date': Date,
     'hour': number,
     'temperature': number,

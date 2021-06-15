@@ -1,0 +1,268 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Cascade Weather Data Stack
+
+Parameters:
+  VISUALCROSSINGAPIKEY:
+    Type: String
+
+Resources:
+  DailyEvent:
+    Type: AWS::Events::Rule
+    Properties:
+
+      Description: Daily event that triggers weather data retrieval
+      ScheduleExpression: cron(0 1 * * ? *)
+      Targets: 
+        -
+          Arn: !GetAtt FillQueueFunction.Arn
+          Id: "FillQueue-HourlyEvent"
+
+  FillQueuePermission:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt FillQueueFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyEvent.Arn
+  
+  FillQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../dist/fillQueue/package.zip
+      FunctionName: FillWeatherQueueFunction
+      Handler: fillQueue.handler
+      Policies: 
+        - !Ref WriteQueuePolicy
+        - !Ref ReadLocationsPolicy
+      Runtime: nodejs14.x
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref LocationData
+          QUEUE_URL: !Ref WeatherDataQueue
+
+  ProcessQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../dist/processQueue/package.zip
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt WeatherDataQueue.Arn
+            BatchSize: 10
+      FunctionName: ProcessWeatherQueueFunction
+      Handler: processQueue.handler
+      Policies:
+        - !Ref ReadQueuePolicy
+        - !Ref WriteWeatherDataPolicy
+      Runtime: nodejs14.x
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref WeatherData
+          API_KEY: !Ref VISUALCROSSINGAPIKEY
+
+  # NOT PART OF FREE TIER
+  #
+  # UpdateElasticSearchFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: ../dist/package.zip
+  #     Events:
+  #       DynamoDbEvent:
+  #         Type: DynamoDb
+  #         Properties:
+  #           Stream: !GetAtt WeatherData.StreamArn
+  #           BatchSize: 100
+  #     FunctionName: UpdateWeatherElasticSearchFunction
+  #     Handler: elasticSearch/syncElasticSearch.handler
+  #     Role: !Ref Update_ElasticSearch_Role
+  #     Runtime: nodejs14.x
+
+  WeatherDataQueue:
+    Type: AWS::SQS::Queue
+
+  # NOT PART OF FREE TIER
+  #
+  # WeatherSearch:
+  #   Type: AWS::Elasticsearch::Domain
+
+  LocationData:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        -
+          AttributeName: "Name"
+          AttributeType: "S"
+        -
+          AttributeName: "Country"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "Country"
+          KeyType: "HASH"
+        -
+          AttributeName: "Name"
+          KeyType: "RANGE"
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  WeatherData:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        -
+          AttributeName: "Name"
+          AttributeType: "S"
+        # -
+        #   AttributeName: "LatitudeLongitude"
+        #   AttributeType: "S"
+        -
+          AttributeName: "Date"
+          AttributeType: "S"
+        # -
+        #   AttributeName: "Stations"
+        #   AttributeType: "S"
+        -
+          AttributeName: "Hour"
+          AttributeType: "N"
+        # -
+        #   AttributeName: "Temperature"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "WindChill"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "HeatIndex"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "Precipitation"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "Snow"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "SnowDepth"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "WindSpeed"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "WindDirection"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "WindGust"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "Visibility"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "CloudCover"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "RelativeHumidity"
+        #   AttributeType: "N"
+        # -
+        #   AttributeName: "Conditions"
+        #   AttributeType: "S"    
+      KeySchema:
+        -
+          AttributeName: "Name"
+          KeyType: "HASH"
+        -
+          AttributeName: "Date"
+          KeyType: "RANGE"
+      GlobalSecondaryIndexes: 
+        -
+          IndexName: "hourly"
+          KeySchema:
+            -
+              AttributeName: "Date"
+              KeyType: "HASH"
+            -
+              AttributeName: "Hour"
+              KeyType: "RANGE"
+          Projection: 
+            ProjectionType: "ALL"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+
+  WriteQueuePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'sqs:SendMessage'
+            Resource: !GetAtt WeatherDataQueue.Arn
+
+  ReadQueuePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties: 
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'sqs:ReadMessage'
+            Resource: !GetAtt WeatherDataQueue.Arn
+
+  ReadLocationsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "dynamodb:GetItem"
+              - "dynamodb:BatchGetItem"
+              - "dynamodb:Scan"
+              - "dynamodb:Query"
+              - "dynamodb:ConditionCheckItem"
+            Resource: !GetAtt LocationData.Arn
+  
+  WriteWeatherDataPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - "dynamodb:PutItem"
+              - "dynamodb:UpdateItem"
+              - "dynamodb:DeleteItem"
+              - "dynamodb:BatchWriteItem"
+              - "dynamodb:Scan"
+              - "dynamodb:Query"
+              - "dynamodb:ConditionCheckItem"
+            Resource: !GetAtt WeatherData.Arn
+
+  # NOT PART OF FREE TIER
+  #
+  # Update_ElasticSearch_Role:
+  #   Type: AWS::IAM::Role
+  #   Properties:
+  #     AssumeRolePolicyDocument:
+  #       Version: "2012-10-17"
+  #       Statement:
+  #         - Effect: Allow
+  #           Principal:
+  #             Service:
+  #               - ec2.amazonaws.com
+  #           Action:
+  #             - 'sts:AssumeRole'
+  #     ManagedPolicies:
+  #       - !GetAtt AWSLambdaExecutionRole.Arn

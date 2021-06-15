@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Cascade Weather Data Stack
+Parameters:
+  VISUALCROSSINGAPIKEY:
+    Type: String
+Resources:
+  DailyEvent:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Daily event that triggers weather data retrieval
+      ScheduleExpression: cron(0 1 * * ? *)
+      Targets:
+      - Arn:
+          Fn::GetAtt:
+          - FillQueueFunction
+          - Arn
+        Id: FillQueue-HourlyEvent
+  FillQueuePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Fn::GetAtt:
+        - FillQueueFunction
+        - Arn
+      Principal: events.amazonaws.com
+      SourceArn:
+        Fn::GetAtt:
+        - DailyEvent
+        - Arn
+  FillQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cascade-energy/3a3d50c9496104111b836786e2194fc3
+      FunctionName: FillWeatherQueueFunction
+      Handler: fillQueue.handler
+      Policies:
+      - Ref: WriteQueuePolicy
+      - Ref: ReadLocationsPolicy
+      Runtime: nodejs14.x
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: LocationData
+          QUEUE_URL:
+            Ref: WeatherDataQueue
+  ProcessQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://cascade-energy/b6fff3a391d41ac92afd838a64b1a3ae
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt:
+              - WeatherDataQueue
+              - Arn
+            BatchSize: 10
+      FunctionName: ProcessWeatherQueueFunction
+      Handler: processQueue.handler
+      Policies:
+      - Ref: ReadQueuePolicy
+      - Ref: WriteWeatherDataPolicy
+      Runtime: nodejs14.x
+      Environment:
+        Variables:
+          TABLE_NAME:
+            Ref: WeatherData
+          API_KEY:
+            Ref: VISUALCROSSINGAPIKEY
+  WeatherDataQueue:
+    Type: AWS::SQS::Queue
+  LocationData:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: Name
+        AttributeType: S
+      - AttributeName: Country
+        AttributeType: S
+      KeySchema:
+      - AttributeName: Country
+        KeyType: HASH
+      - AttributeName: Name
+        KeyType: RANGE
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+  WeatherData:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: Name
+        AttributeType: S
+      - AttributeName: Date
+        AttributeType: S
+      - AttributeName: Hour
+        AttributeType: N
+      KeySchema:
+      - AttributeName: Name
+        KeyType: HASH
+      - AttributeName: Date
+        KeyType: RANGE
+      GlobalSecondaryIndexes:
+      - IndexName: hourly
+        KeySchema:
+        - AttributeName: Date
+          KeyType: HASH
+        - AttributeName: Hour
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+      BillingMode: PROVISIONED
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+  WriteQueuePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - sqs:SendMessage
+          Resource:
+            Fn::GetAtt:
+            - WeatherDataQueue
+            - Arn
+  ReadQueuePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - sqs:ReadMessage
+          Resource:
+            Fn::GetAtt:
+            - WeatherDataQueue
+            - Arn
+  ReadLocationsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:BatchGetItem
+          - dynamodb:Scan
+          - dynamodb:Query
+          - dynamodb:ConditionCheckItem
+          Resource:
+            Fn::GetAtt:
+            - LocationData
+            - Arn
+  WriteWeatherDataPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:DeleteItem
+          - dynamodb:BatchWriteItem
+          - dynamodb:Scan
+          - dynamodb:Query
+          - dynamodb:ConditionCheckItem
+          Resource:
+            Fn::GetAtt:
+            - WeatherData
+            - Arn

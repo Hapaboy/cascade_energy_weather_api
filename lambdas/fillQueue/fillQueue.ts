@@ -3,10 +3,11 @@
 // Record/report any errors
 
 import { AWSError, DynamoDB, SQS } from 'aws-sdk'
-import { uuidv4 } from 'uuid'
+import { v4 as uuidv4 } from 'uuid'
+import { ILocation } from './iLocation'
 
-const TABLE_NAME: string = process.env.TABLE_NAME
-const QUEUE_URL: string = process.env.QUEUE_URL
+const TABLE_NAME: string | undefined = process.env.TABLE_NAME
+const QUEUE_URL: string | undefined = process.env.QUEUE_URL
 
 const YESTERDAY: number = new Date().setDate(new Date().getDate() -1)
 
@@ -15,13 +16,14 @@ type EntryListFunction = (locations: Array<any>) => SQS.SendMessageBatchRequestE
 const createEntryList: EntryListFunction = (locations: Array<any>) => {
     const entries: Array<SQS.SendMessageBatchRequestEntry> = new Array<SQS.SendMessageBatchRequestEntry>()
     locations?.forEach(location => {
-        if (location.zipcode) {
+        console.log(`location: ${location.name}`)
+        if (location.latitudeLongitude) {
             entries.push({
                 Id: uuidv4(),
                 MessageBody: JSON.stringify({
                     'start': YESTERDAY,
                     'end': YESTERDAY,
-                    'location': location.zipcode
+                    'location': location.latitudeLongitude
                 })
             })
         }
@@ -29,7 +31,7 @@ const createEntryList: EntryListFunction = (locations: Array<any>) => {
     return entries
 }
 
-export const handler = async (event: any = {}, context: any = {}): Promise<any> => {
+export const handler = (event: any = {}, context: any = {}) => {
     console.log("EVENT: \n" + JSON.stringify(event, null, 2))
     console.log("CONTEXT: \n" + JSON.stringify(context, null, 2))
 
@@ -37,19 +39,40 @@ export const handler = async (event: any = {}, context: any = {}): Promise<any> 
     const queue: SQS = new SQS()
 
     const input: DynamoDB.QueryInput = {
-        TableName: TABLE_NAME
+        TableName: TABLE_NAME as string,
+        KeyConditionExpression: 'Country = :countryAbbr',
+        Select: 'ALL_ATTRIBUTES',
+        ExpressionAttributeValues: {':countryAbbr':{'S':'US'}}
     }
 
     db.query(input, (err: AWSError, data: DynamoDB.QueryOutput) => {
-        let locations: Array<any> = new Array<any>()        
-        data.Items.forEach(location => {
-            locations.push(location)
-            if (locations.length === 10) {
+        if (err) {
+            console.log(`Error querying locations: ${JSON.stringify(err)}`)
+        }
+        console.log(`Location data: ${JSON.stringify(data)}`)
+        let locations: Array<ILocation> = new Array<ILocation>()
+        let count: number = 1      
+        data?.Items?.forEach((locationEntry: any) => {
+            console.log(`locationEntry: ${JSON.stringify(locationEntry)}`)
+            const loc: ILocation = {
+                name: locationEntry.Name.S,
+                latitudeLongitude: `${locationEntry.Latitude.N},${locationEntry.Longitude.N}`
+            }
+
+            locations.push(loc)
+            if (locations.length === 10 || data.Items?.length === count) {
                 const request: SQS.SendMessageBatchRequest = {
-                    QueueUrl: QUEUE_URL,
+                    QueueUrl: QUEUE_URL as string,
                     Entries: createEntryList(locations)
                 }
-                queue.sendMessageBatch(request)
+                queue.sendMessageBatch(request, (sqsErr: AWSError, data: SQS.SendMessageBatchResult) => {
+                    if (sqsErr) {
+                        console.log(`SQS Error: ${JSON.stringify(sqsErr)}`)
+                    }
+                    else {
+                        console.log(`SQS data: ${JSON.stringify(data)}`)
+                    }
+                })
                 locations.length = 0
             } 
         })

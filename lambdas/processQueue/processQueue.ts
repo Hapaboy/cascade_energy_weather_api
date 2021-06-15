@@ -2,28 +2,33 @@
 // Transform data
 // Write data to dynamodb
 import { AWSError, DynamoDB } from 'aws-sdk'
-import { IHourlyWeatherData } from '../models/iHourlyWeatherData'
-import { IWeatherModel } from '../models/iWeatherModel'
+import { IHourlyWeatherData } from './iHourlyWeatherData'
+import { IWeatherModel } from './iWeatherModel'
 const https = require('https')
 
-const API_KEY: string = process.env.API_KEY // 'BPK6NX8ZR3A87WYVF3GE98GUU' Get from environment variable
+const API_KEY: string | undefined = process.env.API_KEY
 const UNIT_GROUP: string = 'us'
-const TABLE_NAME: string = process.env.TABLE_NAME
+const TABLE_NAME: string | undefined = process.env.TABLE_NAME
 const db: DynamoDB = new DynamoDB()
 
-const retrieveWeatherData = function (location: string, start: Date = null, end: Date = null) { 
-    var requestUrl = `https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/${encodeURIComponent(location)}`
+const retrieveWeatherData = function (location: string, start: Date | null = null, end: Date | null = null) { 
+    let requestUrl = `https://weather.visualcrossing.com/VisualCrossingWebServices/rest/services/timeline/${encodeURIComponent(location)}`
+    //console.log('retrieving weather data')
 
-    if (start) requestUrl+=`/${start}`
-    if (start && end) requestUrl+=`/${end}`
+    if (start) {
+        const startDate: Date = new Date(start)
+        requestUrl+=`/${startDate.getFullYear()}-${startDate.getMonth()}-${startDate.getDay()}`
+    }
+
     requestUrl+=`?unitGroup=${UNIT_GROUP}&key=${API_KEY}&include=${encodeURIComponent('obs,hours')}`
 
+    //console.log(requestUrl)
     return new Promise(function(resolve, reject) {
-		https.get(requestUrl, function (res) { 
+		https.get(requestUrl, function (res: any) { 
 		  var statusCode= res.statusCode;
 		  const contentType = res.headers['content-type'];
 
-		  var error;
+		  var error: string;
 		  if (statusCode !== 200) {
 			error = `Request Failed. Status Code: ${statusCode}`;
 		  } else if (!/^application\/json/.test(contentType)) {
@@ -33,7 +38,7 @@ const retrieveWeatherData = function (location: string, start: Date = null, end:
 		  
 		  res.setEncoding('utf8');
 		  let rawData = '';
-		  res.on('data', (chunk) => { rawData += chunk; });
+		  res.on('data', (chunk: string) => { rawData += chunk; });
 		  res.on('end', () => {
 			try {
 				if (error) {
@@ -47,128 +52,143 @@ const retrieveWeatherData = function (location: string, start: Date = null, end:
 			  reject(`Unexpected error ${e.message}`);
 			}
 		  });
-		}).on('error', (e) => {
+		}).on('error', (e: any) => {
 			console.error(`Error 3 ${e}`);;
 			 reject(`Communication error ${e}`);
 		});
 	});
 }
 
-const dayWeatherToItem = (dayWeather: IWeatherModel) => {    
-    return {
+const hourlyWeatherToItem = (hourlyWeather: IHourlyWeatherData, dayWeather: IWeatherModel) => {
+    //console.log(JSON.stringify(hourlyWeather))
+    let item: any = {
         'Name': {
-            'S': dayWeather.name
+            'S': hourlyWeather.location
+        },
+        'Date': {
+            'S': hourlyWeather.date.toString()    
         },
         'LatitudeLongitude': {
             'S': dayWeather.latitudeLongitude
         },
-        'Date' : {
-            'S': dayWeather.date.toISOString()
-        },
-        'Maximum': {
-            'N': dayWeather.maximum.toString()
-        },
-        'Minimum': {
-            'N': dayWeather.minimum.toString()
-        },
-        'Stations': {
-            'SS': dayWeather.stations
-        }
-    }
-}
-
-const hourlyWeatherToItem = (hourlyWeather: IHourlyWeatherData) => {
-
-    return {
-        'Date': {
-            'S': hourlyWeather.date.toISOString()    
-        },
         'Hour': {
             'N': hourlyWeather.hour.toString()
-        },
-        'Temperature': {
-            'N': hourlyWeather.temperature.toString()
-        },
-        'WindChill': {
-            'N': hourlyWeather.windChill.toString()
-        },
-        'HeatIndex': {
-            'N': hourlyWeather.heatIndex.toString()
-        },
-        'Precipitation': {
-            'N': hourlyWeather.precipitation.toString()
-        },
-        'Snow': {
-            'N': hourlyWeather.snow.toString()
-        },
-        'SnowDepth': {
-            'N': hourlyWeather.snowDepth.toString()
-        },
-        'WindSpeed': {
-            'N': hourlyWeather.windSpeed.toString()
-        },
-        'WindDirection': {
-            'N': hourlyWeather.windDirection.toString()
-        },
-        'Windgust': {
-            'N': hourlyWeather.windgust.toString()
-        },
-        'Visibility': {
-            'N': hourlyWeather.visibility.toString()
-        },
-        'CloudCover': {
-            'N': hourlyWeather.cloudCover.toString()
-        },
-        'RelativeHumidity': {
-            'N': hourlyWeather.relativeHumidity.toString()
-        },
-        'Conditions': {
-            'S': hourlyWeather.conditions
         }
     }
+
+    if (hourlyWeather.temperature) {
+        item.Temperature = {
+            'N': hourlyWeather.temperature.toString()
+        } 
+    }
+    if (hourlyWeather.windChill) {
+        item.WindChill = {
+            'N': hourlyWeather.windChill.toString()
+        } 
+    }
+    if (hourlyWeather.heatIndex) {
+        item.HeatIndex = {
+            'N': hourlyWeather.heatIndex.toString()
+        }
+    }
+    if (hourlyWeather.precipitation) {
+        item.Precipitation = {
+            'N': hourlyWeather.precipitation.toString()
+        } 
+    }
+     if (hourlyWeather.snow){
+         item.Snow = {
+            'N': hourlyWeather.snow.toString()
+        } 
+     }
+     if (hourlyWeather.snowDepth) {
+         item.SnowDepth = {
+            'N': hourlyWeather.snowDepth.toString()
+        }
+     }
+     if (hourlyWeather.windSpeed) {
+         item.WindSpeed = {
+            'N': hourlyWeather.windSpeed.toString()
+        } 
+     }
+     if (hourlyWeather.windDirection) {
+         item.WindDirection = {
+            'N': hourlyWeather.windDirection.toString()
+        } 
+     }
+     if (hourlyWeather.windgust) {
+         item.Windgust = {
+            'N': hourlyWeather.windgust.toString()
+        } 
+     }
+     if (hourlyWeather.visibility) {
+         item.Visibility = {
+            'N': hourlyWeather.visibility.toString()
+        }
+     }
+     if (hourlyWeather.cloudCover) {
+         item.CloudCover = {
+            'N': hourlyWeather.cloudCover.toString()
+        } 
+     }
+     if (hourlyWeather.relativeHumidity) {
+         item.RelativeHumidity = {
+            'N': hourlyWeather.relativeHumidity.toString()
+        } 
+     }
+     if (hourlyWeather.conditions) {
+         item.Conditions = {
+            'S': hourlyWeather.conditions.toString()
+        }
+     }
+     if (dayWeather.stations && dayWeather.stations.filter(s => !!s).length > 0) {
+         item.Stations = {
+            'SS': dayWeather.stations
+        } 
+     }
+
+     return item
 }
 
-const addDayData = (weather: IWeatherModel) => {
-    const params: DynamoDB.PutItemInput = {
-        TableName: TABLE_NAME,
-        Item: dayWeatherToItem(weather)
-    }
-
-    db.putItem(params, (err: AWSError, data: DynamoDB.PutItemOutput) => {
-    })
-
+const addWeatherData = (weather: IWeatherModel) => {
     weather.hourlyData?.forEach((hourData: IHourlyWeatherData) => {
-        addHourlyData(hourData)
-    })
-}
+        let item = hourlyWeatherToItem(hourData, weather) 
 
-const addHourlyData = (data: IHourlyWeatherData) => {
-    const params: DynamoDB.PutItemInput = {
-        TableName: TABLE_NAME,
-        Item: hourlyWeatherToItem(data)
-    }
+        const params: DynamoDB.PutItemInput = {
+            TableName: TABLE_NAME as string,
+            Item: item
+        }
 
-    db.putItem(params, (err: AWSError, data: DynamoDB.PutItemOutput) => {
-    })
+        db.putItem(params, (err: AWSError, data: DynamoDB.PutItemOutput) => {
+            if (err) {
+                console.log(`error adding item: ${JSON.stringify(err)}`)
+            }
+            else {
+                console.log(`item added: ${JSON.stringify(data)}`)
+            }
+        })
+    })    
 }
 
 const parseWeatherData: (data: any) => Array<IWeatherModel> = (data: any) => {
     let weatherData: Array<IWeatherModel> = new Array<IWeatherModel>()
 
-    data.days.foreach((dayData: any) => {
+    console.log(`Weather data: ${JSON.stringify(data)}`)
+    data.days.forEach((dayData: any) => {
         let weather: IWeatherModel = {
-            latitudeLongitude: `${dayData.latitude},${dayData.longitude}`,
-            name: dayData.resolvedAddress,
-            date: dayData.datetime,
-            maximum: dayData.tempmax,
-            minimum: dayData.tempmin,
-            stations: [...dayData.stations.map(s => s?.name)]
+            latitudeLongitude: `${data?.latitude},${data?.longitude}`,
+            name: data?.resolvedAddress,
+            date: dayData?.datetime,
+            maximum: dayData?.tempmax,
+            minimum: dayData?.tempmin,
+            stations: (dayData.stations) ? [...dayData.stations.map((s: any) => s?.name)] : []
         }
 
         let hourlyData: Array<IHourlyWeatherData> = new Array<IHourlyWeatherData>()
 
-        dayData.hours.foreach((hourData: any) => {
+    dayData.hours.forEach((hourData: any) => {
             let hourWeather: IHourlyWeatherData = {
+                location: weather.name,
                 date: weather.date,
                 hour: hourData.datetime.split(':')[0] as number, // This is in the format: 01:00:00 for 1am
                 temperature: hourData.temp,
@@ -188,31 +208,25 @@ const parseWeatherData: (data: any) => Array<IWeatherModel> = (data: any) => {
 
             hourlyData.push(hourWeather)
         })
-
+        weather.hourlyData = hourlyData
         weatherData.push(weather)
     })
 
     return weatherData
 }
 
-export const handler = async (event: any = {}, context: any = {}): Promise<any> => {
-    console.log("EVENT: \n" + JSON.stringify(event, null, 2))
-    console.log("CONTEXT: \n" + JSON.stringify(context, null, 2))
+export const handler = (event: any = {}, context: any = {}) => {
+    //console.log("EVENT: \n" + JSON.stringify(event, null, 2))
+    //console.log("CONTEXT: \n" + JSON.stringify(context, null, 2))
 
-    return new Promise<any>(async (resolve, reject) => {
-        try {
-            event.locations.foreach(async (location) => {
-                const data: any = await retrieveWeatherData(event.location, event.start, event.end)
-            
-                const weatherData: Array<IWeatherModel> = parseWeatherData(data)
-                weatherData.forEach((dayData: IWeatherModel) => {
-                    addDayData(dayData)               
-                })
+    event.Records.forEach((record: any) => {
+        const locationRecord = JSON.parse(record?.body)
+        //console.log(`locationRecord: ${JSON.stringify(locationRecord)}`)
+        retrieveWeatherData(locationRecord?.location, locationRecord?.start, locationRecord?.end).then(data => {
+            const weatherData: Array<IWeatherModel> = parseWeatherData(data)
+            weatherData.forEach((dayData: IWeatherModel) => {
+                addWeatherData(dayData)               
             })
-            resolve({status: 200})
-        } catch(err) {
-            reject({status: 500})
-            // Report/record error       
-        }
+        })
     })
 }

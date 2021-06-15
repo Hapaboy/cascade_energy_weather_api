@@ -17,11 +17,10 @@
   },
   "homepage": "https://github.com/Hapaboy/cascade_energy_weather_api#readme",
   "dependencies": {
-    "@types/node": "^15.12.2",
-    "aws-sdk": "^2.927.0",
-    "uuid": "^8.3.2"
+    "@types/node": "^15.12.2"
   },
   "devDependencies": {
-    "@types/aws-sdk": "^2.7.0"
+    "@types/aws-sdk": "^2.7.0",
+    "@types/uuid": "^8.3.0"
   }
 }

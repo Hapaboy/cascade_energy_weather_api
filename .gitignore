@@ -1,1 +1,5 @@
 node_modules/*
+lambdas/fillQueue/node_modules/*
+lambdas/processQueue/node_modules/*
+dist/*
+VisualCrossingKey.txt
